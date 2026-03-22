@@ -103,7 +103,7 @@ public extension Imaginable {
 	/// Place this object against a screen edge defined by `direction`, inset by `buff`.
 	@discardableResult
 	func edge(_ direction: SIMD3<Float>, buff: Float = 0.5) -> Self {
-		guard let bounds = Imagine.coordinateBounds else { return self }
+		guard let bounds = Self.resolveBounds(for: base_entity) else { return self }
 		let sb = base_entity.visualBounds(relativeTo: base_entity)
 
 		if direction.x > 0 {
@@ -119,6 +119,18 @@ public extension Imaginable {
 		}
 
 		return self
+	}
+
+	/// Walk up the entity hierarchy to find a ``CoordinateBoundsComponent``.
+	private static func resolveBounds(for entity: Entity) -> (x: ClosedRange<Float>, y: ClosedRange<Float>)? {
+		var current: Entity? = entity
+		while let e = current {
+			if let comp = e.components[CoordinateBoundsComponent.self] {
+				return (x: comp.x, y: comp.y)
+			}
+			current = e.parent
+		}
+		return Imagine.coordinateBounds
 	}
 }
 
@@ -371,14 +383,14 @@ public extension Imaginable where Self == CircleObject {
 }
 
 public extension Imaginable where Self == RectangleObject {
-	static func Rectangle(width: Float = 2.0, height: Float = 1.0, color: UIColor = .white, depth: Float = 0.01) -> RectangleObject {
-		RectangleObject(width: width, height: height, color: color, depth: depth)
+	static func Rectangle(width: Float = 2.0, height: Float = 1.0, cornerRadius: Float = 0, color: UIColor = .white, depth: Float = 0.01) -> RectangleObject {
+		RectangleObject(width: width, height: height, cornerRadius: cornerRadius, color: color, depth: depth)
 	}
 }
 
 public extension Imaginable where Self == TextObject {
-	static func Text(_ text: String, fontSize: Float = 72, color: UIColor = .white, depth: Float = 0.01) -> TextObject {
-		TextObject(text, fontSize: fontSize, color: color, depth: depth)
+	static func Text(_ text: String, fontSize: Float = 72, fontName: String = "Helvetica", color: UIColor = .white, depth: Float = 0.01) -> TextObject {
+		TextObject(text, fontSize: fontSize, fontName: fontName, color: color, depth: depth)
 	}
 }
 

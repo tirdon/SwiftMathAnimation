@@ -45,6 +45,7 @@ public final class SceneDirector {
 
 	@discardableResult
 	public func add(_ object: some Imaginable) -> some Imaginable {
+		guard object.base_entity.parent == nil else { return object }
 		currentZIndex += zStep
 		object.base_entity.position.z = currentZIndex
 		rootEntity.addChild(object.base_entity)
@@ -95,6 +96,7 @@ public final class SceneDirector {
 /// }
 /// .setCoordinateSpace(x: -4...4, y: -3...3)
 /// ```
+@MainActor
 public struct ImagineView: View {
 	@Binding var timeline: TimelineManager
 	private var scene_callback: @MainActor (SceneDirector) -> Void
@@ -113,22 +115,27 @@ public struct ImagineView: View {
 		return copy
 	}
 
+	@State private var sceneRootID: Entity.ID?
+
 	public var body: some View {
 		RealityView { content in
+			Imagine.registerProgram()
 			content.camera = .virtual
 
-			// Publish coordinate bounds before running the scene callback
+			let rootEntity = Entity()
+
+			// Store per-scene coordinate bounds on the root entity
 			if let xRange, let yRange {
-				Imagine.coordinateBounds = (
+				rootEntity.components.set(CoordinateBoundsComponent(
 					x: Float(xRange.lowerBound)...Float(xRange.upperBound),
 					y: Float(yRange.lowerBound)...Float(yRange.upperBound)
-				)
+				))
 			}
 
-			let rootEntity = Entity()
 			let scene = SceneDirector(root: rootEntity, timeline: timeline)
 			self.scene_callback(scene)
 			content.add(rootEntity)
+			sceneRootID = rootEntity.id
 
 			// Set up camera if coordinate space is specified
 			if let xRange, let yRange {
@@ -147,12 +154,13 @@ public struct ImagineView: View {
 			}
 
 			timeline.play()
-		} update: { _ in
-			// update camera state
-		} placeholder: {
-			
 		}
 		.clipped()
+		.onDisappear {
+			if let id = sceneRootID {
+				AnimationSystem.unregister(sceneID: id)
+			}
+		}
 	}
 }
 
@@ -161,23 +169,26 @@ public struct ImagineView: View {
 /// A playback-control bar providing play/pause, a scrub slider, and elapsed/total time display.
 ///
 /// Bind to a ``TimelineManager`` to control and observe timeline playback.
-struct TimelineControllerView: View {
+public struct TimelineControllerView: View {
 
-	@Binding var timeline: TimelineManager
+	@Binding private var timeline: TimelineManager
 
-	init(timeline: Binding<TimelineManager>) {
+	public init(timeline: Binding<TimelineManager>) {
 		self._timeline = timeline
 	}
 
-	var body: some View {
+	public var body: some View {
 		HStack(spacing: 16) {
-			Button(action: {
-				if timeline.isPlaying {
-					timeline.pause()
-				} else {
+			Button {
+				if !timeline.isPlaying {
+					if timeline.currentTime == timeline.totalDuration {
+						timeline.seek(to: 0)
+					}
 					timeline.play()
+				} else {
+					timeline.pause()
 				}
-			}) {
+			} label: {
 				Image(systemName: timeline.isPlaying ? "pause.fill" : "play.fill")
 					.font(.title2)
 			}

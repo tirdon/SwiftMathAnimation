@@ -19,13 +19,19 @@ public enum Imagine {  }
 
 @MainActor
 public extension Imagine {
+	private static var isRegistered = false
+
 	static func registerProgram() {
+		guard !isRegistered else { return }
+		isRegistered = true
+
 		TimelineTrackComponent.registerComponent()
 		TimelineSequentialComponent.registerComponent()
 		SceneMembershipComponent.registerComponent()
 		ScrubOverrideComponent.registerComponent()
 		PathTrimmingComponent.registerComponent()
 		InteractivityComponent.registerComponent()
+		CoordinateBoundsComponent.registerComponent()
 
 		AnimationSystem.registerSystem()
 		PathTrimmingSystem.registerSystem()
@@ -86,6 +92,7 @@ public final class TimelineManager {
 
 	internal func tick(deltaTime: TimeInterval) {
 		guard isPlaying else { return }
+
 		currentTime += deltaTime * playbackSpeed * direction
 
 		guard totalDuration > 0 else { return }

@@ -93,15 +93,18 @@ public final class RectangleObject: GeometryProvider {
 
 	public let width: Float
 	public let height: Float
+	public let cornerRadius: Float
 
 	public init(
 		width: Float = 2.0,
 		height: Float = 1.0,
+		cornerRadius: Float = 0,
 		color: UIColor = .white,
 		depth: Float = 0.01
 	) {
 		self.width = width
 		self.height = height
+		self.cornerRadius = cornerRadius
 		self.base_entity = Entity()
 		self.strokeEntity = nil
 		self.shapeEntity = nil
@@ -113,7 +116,7 @@ public final class RectangleObject: GeometryProvider {
 			width: CGFloat(width),
 			height: CGFloat(height)
 		)
-		let path = SwiftUI.Path(roundedRect: rect, cornerRadius: 0)
+		let path = SwiftUI.Path(roundedRect: rect, cornerRadius: CGFloat(cornerRadius))
 
 		setupEntity(path: path, depth: depth, strokeWidth: 0.02, color: color)
 	}
@@ -146,21 +149,25 @@ public final class TextObject: GlyphProvider {
 	private let extrusionDepth: Float
 	private let strokeWidth: Float
 
+	public let fontName: String
+
 	public init(
 		_ text: String,
 		fontSize: Float = 72,
+		fontName: String = "Helvetica",
 		color: UIColor = .white,
 		depth: Float = 0.01,
 		strokeWidth: Float = 0.02
 	) {
 		self.text = text
 		self.fontSize = fontSize
+		self.fontName = fontName
 		self.extrusionDepth = depth
 		self.strokeWidth = strokeWidth
 		self.base_entity = Entity()
 		self.color = color
 
-		let ctFont = CTFontCreateWithName("Helvetica" as CFString, CGFloat(fontSize), nil)
+		let ctFont = CTFontCreateWithName(fontName as CFString, CGFloat(fontSize), nil)
 		let glyphDataArray = GlyphData.extract(from: text, font: ctFont)
 
 		let scaleFactor: Float = 1.0 / fontSize

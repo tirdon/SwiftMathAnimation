@@ -80,12 +80,22 @@ extension SwiftUI.Path {
 		let resampledA = resample(pointsA, count: count)
 		let resampledB = resample(pointsB, count: count)
 
+		return interpolate(sourcePoints: resampledA, targetPoints: resampledB, t: t)
+	}
+
+	/// Fast interpolation using pre-cached resampled points (avoids per-frame flattening/resampling).
+	nonisolated static func interpolate(sourcePoints: [CGPoint], targetPoints: [CGPoint], t: Float) -> SwiftUI.Path {
+		guard !sourcePoints.isEmpty, !targetPoints.isEmpty else {
+			return SwiftUI.Path()
+		}
+
 		var result = SwiftUI.Path()
 		let cgt = CGFloat(t)
+		let count = sourcePoints.count
 
 		for i in 0..<count {
-			let x = resampledA[i].x + (resampledB[i].x - resampledA[i].x) * cgt
-			let y = resampledA[i].y + (resampledB[i].y - resampledA[i].y) * cgt
+			let x = sourcePoints[i].x + (targetPoints[i].x - sourcePoints[i].x) * cgt
+			let y = sourcePoints[i].y + (targetPoints[i].y - sourcePoints[i].y) * cgt
 			let point = CGPoint(x: x, y: y)
 
 			if i == 0 {
@@ -100,11 +110,11 @@ extension SwiftUI.Path {
 
 	// MARK: - Private Helpers
 
-	private static func distance(from a: CGPoint, to b: CGPoint) -> CGFloat {
+	nonisolated private static func distance(from a: CGPoint, to b: CGPoint) -> CGFloat {
 		hypot(b.x - a.x, b.y - a.y)
 	}
 
-	private static func approximateQuadLength(from p0: CGPoint, control: CGPoint, to p2: CGPoint, steps: Int = 16) -> CGFloat {
+	nonisolated private static func approximateQuadLength(from p0: CGPoint, control: CGPoint, to p2: CGPoint, steps: Int = 16) -> CGFloat {
 		var length: CGFloat = 0
 		var prev = p0
 		for i in 1...steps {
@@ -119,7 +129,7 @@ extension SwiftUI.Path {
 		return length
 	}
 
-	private static func approximateCubicLength(from p0: CGPoint, c1: CGPoint, c2: CGPoint, to p3: CGPoint, steps: Int = 16) -> CGFloat {
+	nonisolated private static func approximateCubicLength(from p0: CGPoint, c1: CGPoint, c2: CGPoint, to p3: CGPoint, steps: Int = 16) -> CGFloat {
 		var length: CGFloat = 0
 		var prev = p0
 		for i in 1...steps {
@@ -134,7 +144,7 @@ extension SwiftUI.Path {
 		return length
 	}
 
-	private static func flattenPath(_ path: SwiftUI.Path, steps: Int = 16) -> [CGPoint] {
+	nonisolated static func flattenPath(_ path: SwiftUI.Path, steps: Int = 16) -> [CGPoint] {
 		var points: [CGPoint] = []
 		var currentPoint: CGPoint = .zero
 
@@ -171,7 +181,7 @@ extension SwiftUI.Path {
 		return points
 	}
 
-	private static func resample(_ points: [CGPoint], count: Int) -> [CGPoint] {
+	nonisolated static func resample(_ points: [CGPoint], count: Int) -> [CGPoint] {
 		guard points.count >= 2 else {
 			return Array(repeating: points.first ?? .zero, count: count)
 		}
@@ -226,7 +236,7 @@ struct GlyphData: Sendable {
 	let isImageGlyph: Bool
 	let character: String
 
-	init(path: SwiftUI.Path, position: CGPoint, advance: CGFloat) {
+	nonisolated init(path: SwiftUI.Path, position: CGPoint, advance: CGFloat) {
 		self.path = path
 		self.position = position
 		self.advance = advance
@@ -234,7 +244,7 @@ struct GlyphData: Sendable {
 		self.character = ""
 	}
 
-	init(character: String, position: CGPoint, advance: CGFloat) {
+	nonisolated init(character: String, position: CGPoint, advance: CGFloat) {
 		self.path = SwiftUI.Path()
 		self.position = position
 		self.advance = advance
@@ -242,7 +252,7 @@ struct GlyphData: Sendable {
 		self.character = character
 	}
 
-	static func extract(from string: String, font: CTFont) -> [GlyphData] {
+	nonisolated static func extract(from string: String, font: CTFont) -> [GlyphData] {
 		let attributedString = CFAttributedStringCreate(
 			nil,
 			string as CFString,

@@ -1,8 +1,8 @@
 //
-//  Animation.swift
+//  CoreAnimation.swift
 //  Imagine
 //
-//  Created by Thiradon Mueangmo on 19/3/2569 BE.
+//  Created by Thiradon Mueangmo on 22/3/2569 BE.
 //
 
 import Foundation
@@ -55,9 +55,8 @@ public enum AnimationEasing: Sendable {
 	case bounce
 	case spring(damping: Float, stiffness: Float)
 	case custom(@Sendable (Float) -> Float)
-
-	//TODO: fix and clamp [0,1] and continueous
-	internal func apply(_ t: Float) -> Float {
+	
+	nonisolated internal func apply(normalized t: Float) -> Float {
 		switch self {
 		case .linear:
 			return t
@@ -65,26 +64,40 @@ public enum AnimationEasing: Sendable {
 			return t * t
 		case .easeOut:
 			return t * (2 - t)
+			
+		// Elastic ease in
+		case .easeInElastic:
+			if t <= 0 { return 0 }
+			if t >= 1 { return 1 }
+			let c = (2 * Float.pi) / 3
+			return -pow(2, 10 * t - 10) * sin((t * 10 - 10.75) * c)
+			
+		// Elastic ease out
+		case .easeOutElastic:
+			if t <= 0 { return 0 }
+			if t >= 1 { return 1 }
+			let c = (2 * Float.pi) / 3
+			return pow(2, -10 * t) * sin((t * 10 - 0.75) * c) + 1
 		case .easeInOut:
 			return -(cos(Float.pi * t) - 1) / 2
-
+			
 		case .easeInOutQuad:
 			return t < 0.5
-				? 2 * t * t
-				: 1 - pow(-2 * t + 2, 2) / 2
+			? 2 * t * t
+			: 1 - pow(-2 * t + 2, 2) / 2
 		case .easeInOutCubic:
 			return t < 0.5
-				? 4 * t * t * t
-				: 1 - pow(-2 * t + 2, 3) / 2
-
+			? 4 * t * t * t
+			: 1 - pow(-2 * t + 2, 3) / 2
+			
 		// Hermite smoothstep: 3t² − 2t³
 		case .smooth:
 			return t * t * (3 - 2 * t)
-
+			
 		// Perlin smootherstep: 6t⁵ − 15t⁴ + 10t³
 		case .doubleSmooth:
 			return t * t * t * (t * (t * 6 - 15) + 10)
-
+			
 		// Logistic sigmoid mapped to 0…1
 		case .sigmoid(let steepness):
 			let k = steepness
@@ -92,38 +105,24 @@ public enum AnimationEasing: Sendable {
 			let s0 = 1 / (1 + exp(k * 0.5))
 			let s1 = 1 / (1 + exp(-k * 0.5))
 			return (s - s0) / (s1 - s0)
-
+			
 		// Exponential ease-in-out
 		case .expo:
 			if t <= 0 { return 0 }
 			if t >= 1 { return 1 }
 			return t < 0.5
-				? pow(2, 20 * t - 10) / 2
-				: (2 - pow(2, -20 * t + 10)) / 2
-
-		// Elastic ease in
-		case .easeInElastic:
-			if t <= 0 { return 0 }
-			if t >= 1 { return 1 }
-			let c = (2 * Float.pi) / 3
-			return -pow(2, 10 * t - 10) * sin((t * 10 - 10.75) * c)
-
-		// Elastic ease out
-		case .easeOutElastic:
-			if t <= 0 { return 0 }
-			if t >= 1 { return 1 }
-			let c = (2 * Float.pi) / 3
-			return pow(2, -10 * t) * sin((t * 10 - 0.75) * c) + 1
-
+			? pow(2, 20 * t - 10) / 2
+			: (2 - pow(2, -20 * t + 10)) / 2
+			
 		// Wiggle: reaches 1 at the end while oscillating along the way
 		case .wiggle(let oscillations):
 			let n = max(oscillations, 1)
 			return t + sin(t * n * 2 * Float.pi) * (1 - t) * 0.3
-
+			
 		// Bounce ease out
 		case .bounce:
 			return Self.bounceOut(t)
-
+			
 		case .spring(let damping, let stiffness):
 			let omega = sqrt(stiffness)
 			let zeta = damping / (2 * omega)
@@ -133,13 +132,13 @@ public enum AnimationEasing: Sendable {
 			} else {
 				return 1 - (1 + omega * t) * exp(-omega * t)
 			}
-
+			
 		case .custom(let closure_callback):
 			return closure_callback(t)
 		}
 	}
-
-	private static func bounceOut(_ t: Float) -> Float {
+	
+	nonisolated private static func bounceOut(_ t: Float) -> Float {
 		let n1: Float = 7.5625
 		let d1: Float = 2.75
 		var t = t
@@ -182,7 +181,7 @@ extension Shot {
 		let elapsed = time - begin
 		guard duration > 0 else { return elapsed >= 0 ? 1.0 : 0.0 }
 		let normalizedTime = Float(max(0, min(1, elapsed / duration)))
-		return easing.apply(normalizedTime)
+		return easing.apply(normalized: normalizedTime)
 	}
 }
 
@@ -245,12 +244,34 @@ struct PathProgressClip: Shot {
 }
 
 /// A ``Shot`` that morphs between two `SwiftUI.Path` shapes by flattening, resampling, and linearly interpolating their control points.
+///
+/// Flattened/resampled points are cached at creation time so that per-frame evaluation
+/// only performs lightweight point interpolation instead of re-flattening paths every frame.
 struct PathMorphClip: Shot {
 	var begin: TimeInterval
 	var end: TimeInterval
 	var source: SwiftUI.Path
 	var target: SwiftUI.Path
 	var easing: AnimationEasing = .linear
+
+	/// Pre-computed resampled source points.
+	let sourcePoints: [CGPoint]
+	/// Pre-computed resampled target points.
+	let targetPoints: [CGPoint]
+
+	init(begin: TimeInterval, end: TimeInterval, source: SwiftUI.Path, target: SwiftUI.Path, easing: AnimationEasing = .linear) {
+		self.begin = begin
+		self.end = end
+		self.source = source
+		self.target = target
+		self.easing = easing
+
+		let flatA = SwiftUI.Path.flattenPath(source)
+		let flatB = SwiftUI.Path.flattenPath(target)
+		let count = max(flatA.count, flatB.count, 2)
+		self.sourcePoints = SwiftUI.Path.resample(flatA, count: count)
+		self.targetPoints = SwiftUI.Path.resample(flatB, count: count)
+	}
 }
 
 // MARK: - Keyframe Components
@@ -277,7 +298,7 @@ struct TimelineSequentialComponent: Component {
 	var sceneSpeed: Double = 1.0
 	var totalDuration: TimeInterval = 0.0
 	var mode: LoopMode = .playOnce
-
+	
 	/// Defines how playback behaves when reaching the end of the timeline.
 	enum LoopMode { case playOnce, loop, pingpong }
 }
@@ -314,7 +335,7 @@ struct PathTrimmingComponent: Component {
 	var filled: Bool
 	var needsRebuild: Bool
 	var materialColor: SIMD4<Float>
-
+	
 	init(originalPath: SwiftUI.Path,
 		 extrusionDepth: Float = 0.01,
 		 strokeWidth: Float = 0.02,
@@ -340,6 +361,15 @@ struct InteractivityComponent: Component {
 	var isHoldable: Bool = false
 }
 
+/// An ECS component that stores per-scene coordinate bounds.
+///
+/// Attached to the root entity of each ``SceneDirector`` so that ``Imaginable/edge(_:buff:)``
+/// can resolve the correct bounds by walking up the entity hierarchy.
+struct CoordinateBoundsComponent: Component {
+	var x: ClosedRange<Float>
+	var y: ClosedRange<Float>
+}
+
 // MARK: - Animation System
 
 /// A RealityKit `System` that evaluates all ``TimelineTrackComponent`` clips every frame.
@@ -351,21 +381,31 @@ struct InteractivityComponent: Component {
 /// 4. Evaluates position, scale, rotation, color, opacity, path-progress, and path-morph clips.
 @MainActor
 final class AnimationSystem: System {
-
+	
 	static var managers: [Entity.ID: TimelineManager] = [:]
-
+	
 	static func register(_ manager: TimelineManager, for sceneID: Entity.ID) {
 		managers[sceneID] = manager
 	}
 
+	static func unregister(sceneID: Entity.ID) {
+		managers.removeValue(forKey: sceneID)
+	}
+	
 	private static let trackingQuery = EntityQuery(where: .has(TimelineTrackComponent.self))
+	private static let sceneRootQuery = EntityQuery(where: .has(SceneMembershipComponent.self))
 
 	required init(scene: RealityKit.Scene) {  }
 
 	func update(context: SceneUpdateContext) {
 		let dt = context.deltaTime
-		for (_, manager) in Self.managers {
-			manager.tick(deltaTime: dt)
+
+		// Only tick managers whose root entities belong to THIS scene
+		for entity in context.entities(matching: Self.sceneRootQuery, updatingSystemWhen: .rendering) {
+			if let membership = entity.components[SceneMembershipComponent.self],
+			   let manager = Self.managers[membership.id] {
+				manager.tick(deltaTime: dt)
+			}
 		}
 
 		for entity in context.entities(matching: Self.trackingQuery, updatingSystemWhen: .rendering) {
@@ -380,7 +420,7 @@ final class AnimationSystem: System {
 			evaluatePathMorphClips(track.pathMorphClips, at: time, for: entity)
 		}
 	}
-
+	
 	// MARK: Time Resolution
 	private static func resolveTime(for entity: Entity) -> TimeInterval? {
 		var current: Entity? = entity
@@ -393,7 +433,7 @@ final class AnimationSystem: System {
 		}
 		return nil
 	}
-
+	
 	// MARK:  Clip Evaluation
 	private func evaluatePositionClips(_ clips: [PositionClip], at time: TimeInterval, for entity: Entity) {
 		guard let first = clips.first else { return }
@@ -406,7 +446,7 @@ final class AnimationSystem: System {
 			entity.position = simd_mix(clip.source, clip.target, SIMD3<Float>(repeating: t))
 		}
 	}
-
+	
 	private func evaluateScaleClips(_ clips: [ScaleClip], at time: TimeInterval, for entity: Entity) {
 		guard let first = clips.first else { return }
 		if time < first.begin {
@@ -418,7 +458,7 @@ final class AnimationSystem: System {
 			entity.scale = simd_mix(clip.source, clip.target, SIMD3<Float>(repeating: t))
 		}
 	}
-
+	
 	private func evaluateRotationClips(_ clips: [RotationClip], at time: TimeInterval, for entity: Entity) {
 		guard let first = clips.first else { return }
 		if time < first.begin {
@@ -430,7 +470,7 @@ final class AnimationSystem: System {
 			entity.orientation = simd_slerp(clip.source, clip.target, t)
 		}
 	}
-
+	
 	private func evaluateColorClips(_ clips: [ColorClip], at time: TimeInterval, for entity: Entity) {
 		guard let first = clips.first else { return }
 		if time < first.begin {
@@ -453,7 +493,7 @@ final class AnimationSystem: System {
 			applyMaterial(material, to: entity)
 		}
 	}
-
+	
 	private func applyMaterial(_ material: UnlitMaterial, to entity: Entity) {
 		if var model = entity.components[ModelComponent.self] {
 			model.materials = [material]
@@ -463,7 +503,7 @@ final class AnimationSystem: System {
 			applyMaterial(material, to: child)
 		}
 	}
-
+	
 	private func evaluateOpacityClips(_ clips: [OpacityClip], at time: TimeInterval, for entity: Entity) {
 		guard let first = clips.first else { return }
 		if time < first.begin {
@@ -476,7 +516,7 @@ final class AnimationSystem: System {
 			entity.components.set(OpacityComponent(opacity: opacity))
 		}
 	}
-
+	
 	private func evaluatePathProgressClips(_ clips: [PathProgressClip], at time: TimeInterval, for entity: Entity) {
 		guard let first = clips.first else { return }
 		if time < first.begin {
@@ -495,7 +535,7 @@ final class AnimationSystem: System {
 			entity.components.set(comp)
 		}
 	}
-
+	
 	private func evaluatePathMorphClips(_ clips: [PathMorphClip], at time: TimeInterval, for entity: Entity) {
 		guard let first = clips.first else { return }
 		if time < first.begin {
@@ -508,7 +548,7 @@ final class AnimationSystem: System {
 		for clip in clips where time >= clip.begin {
 			let t = clip.progress(at: time)
 			guard var comp = entity.components[PathTrimmingComponent.self] else { continue }
-			let interpolated = SwiftUI.Path.interpolate(clip.source, clip.target, t: t)
+			let interpolated = SwiftUI.Path.interpolate(sourcePoints: clip.sourcePoints, targetPoints: clip.targetPoints, t: t)
 			comp.originalPath = interpolated
 			comp.needsRebuild = true
 			entity.components.set(comp)
@@ -527,19 +567,19 @@ final class AnimationSystem: System {
 /// A progress of `0` removes the mesh entirely; a progress of `1` uses the full original path.
 @MainActor
 final class PathTrimmingSystem: System {
-
+	
 	private static let query = EntityQuery(where: .has(PathTrimmingComponent.self))
-
+	
 	required init(scene: RealityKit.Scene) {}
-
+	
 	func update(context: SceneUpdateContext) {
 		for entity in context.entities(matching: Self.query, updatingSystemWhen: .rendering) {
 			guard var comp = entity.components[PathTrimmingComponent.self] else { continue }
 			guard comp.needsRebuild else { continue }
-
+			
 			comp.needsRebuild = false
 			entity.components.set(comp)
-
+			
 			// Sync cached color from current ModelComponent if present
 			if let model = entity.components[ModelComponent.self],
 			   let mat = model.materials.first as? UnlitMaterial {
@@ -550,26 +590,26 @@ final class PathTrimmingSystem: System {
 				entity.components.set(updated)
 				comp = updated
 			}
-
+			
 			// Progress 0 → remove mesh so nothing is visible
 			if comp.currentProgress <= 0 {
 				entity.components.remove(ModelComponent.self)
 				continue
 			}
-
+			
 			let trimmedPath: SwiftUI.Path
 			if comp.currentProgress >= 1 {
 				trimmedPath = comp.originalPath
 			} else {
 				trimmedPath = comp.originalPath.trimmedPath(from: 0, to: CGFloat(comp.currentProgress))
 			}
-
+			
 			let c = comp.materialColor
 			let material: any RealityKit.Material = UnlitMaterial(color: UIColor(
 				red: CGFloat(c.x), green: CGFloat(c.y),
 				blue: CGFloat(c.z), alpha: CGFloat(c.w)
 			))
-
+			
 			if let model = trimmedPath.extrudedMesh(
 				depth: comp.extrusionDepth,
 				strokeWidth: comp.strokeWidth,

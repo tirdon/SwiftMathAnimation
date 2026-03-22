@@ -180,6 +180,192 @@ public struct Animate: ImagineScheduler {
 	}
 }
 
+// MARK: - FadeIn
+
+/// An animation scheduler that fades an object in from fully transparent.
+///
+/// Sets the object's opacity to 0 at the start and animates it to 1 over the duration.
+/// Works with any ``Imaginable`` object.
+@MainActor
+public struct FadeIn: ImagineScheduler {
+
+	let object: any Imaginable
+
+	public var objects: [any Imaginable] { [object] }
+
+	public init(_ object: any Imaginable) {
+		self.object = object
+	}
+
+	public func schedule(startTime: TimeInterval, duration: TimeInterval, easing: AnimationEasing) {
+		let entity = object.base_entity
+		entity.components.set(OpacityComponent(opacity: 0))
+
+		var track = entity.components[TimelineTrackComponent.self] ?? TimelineTrackComponent()
+		track.opacityClips.append(OpacityClip(
+			begin: startTime,
+			end: startTime + duration,
+			source: 0,
+			target: 1,
+			easing: easing
+		))
+		entity.components.set(track)
+	}
+}
+
+// MARK: - FadeOut
+
+/// An animation scheduler that fades an object out to fully transparent.
+///
+/// Animates the object's opacity from 1 to 0 over the duration.
+/// Works with any ``Imaginable`` object.
+@MainActor
+public struct FadeOut: ImagineScheduler {
+
+	let object: any Imaginable
+
+	public var objects: [any Imaginable] { [object] }
+
+	public init(_ object: any Imaginable) {
+		self.object = object
+	}
+
+	public func schedule(startTime: TimeInterval, duration: TimeInterval, easing: AnimationEasing) {
+		let entity = object.base_entity
+
+		var track = entity.components[TimelineTrackComponent.self] ?? TimelineTrackComponent()
+		track.opacityClips.append(OpacityClip(
+			begin: startTime,
+			end: startTime + duration,
+			source: 1,
+			target: 0,
+			easing: easing
+		))
+		entity.components.set(track)
+	}
+}
+
+// MARK: - AnimationGroup
+
+/// An animation scheduler that plays multiple schedulers simultaneously.
+///
+/// All child schedulers share the same start time and duration:
+/// ```swift
+/// scene.play(
+///     AnimationGroup(
+///         Animate(circle).position(at: 2.i),
+///         Animate(square).color(to: .blue)
+///     ),
+///     duration: 1.0
+/// )
+/// ```
+@MainActor
+public struct AnimationGroup: ImagineScheduler {
+
+	let schedulers: [any ImagineScheduler]
+
+	public var objects: [any Imaginable] { schedulers.flatMap { $0.objects } }
+
+	public init(_ schedulers: any ImagineScheduler...) {
+		self.schedulers = schedulers
+	}
+
+	public init(_ schedulers: [any ImagineScheduler]) {
+		self.schedulers = schedulers
+	}
+
+	public func schedule(startTime: TimeInterval, duration: TimeInterval, easing: AnimationEasing) {
+		for scheduler in schedulers {
+			scheduler.schedule(startTime: startTime, duration: duration, easing: easing)
+		}
+	}
+}
+
+// MARK: - Succession
+
+/// An animation scheduler that plays multiple schedulers one after another.
+///
+/// The total duration is divided equally among child schedulers:
+/// ```swift
+/// scene.play(
+///     Succession(
+///         Create(circle),
+///         Animate(circle).color(to: .red),
+///         Destruct(circle)
+///     ),
+///     duration: 3.0  // 1s each
+/// )
+/// ```
+@MainActor
+public struct Succession: ImagineScheduler {
+
+	let schedulers: [any ImagineScheduler]
+
+	public var objects: [any Imaginable] { schedulers.flatMap { $0.objects } }
+
+	public init(_ schedulers: any ImagineScheduler...) {
+		self.schedulers = schedulers
+	}
+
+	public init(_ schedulers: [any ImagineScheduler]) {
+		self.schedulers = schedulers
+	}
+
+	public func schedule(startTime: TimeInterval, duration: TimeInterval, easing: AnimationEasing) {
+		guard !schedulers.isEmpty else { return }
+		let each = duration / TimeInterval(schedulers.count)
+		for (i, scheduler) in schedulers.enumerated() {
+			scheduler.schedule(startTime: startTime + TimeInterval(i) * each, duration: each, easing: easing)
+		}
+	}
+}
+
+// MARK: - LaggedStart
+
+/// An animation scheduler that plays multiple schedulers with staggered start times.
+///
+/// The `lagRatio` controls overlap: `0` = all simultaneous, `1` = sequential (no overlap),
+/// `0.5` = 50 % overlap between consecutive animations.
+///
+/// ```swift
+/// scene.play(
+///     LaggedStart(Create(a), Create(b), Create(c), lagRatio: 0.5),
+///     duration: 2.0
+/// )
+/// ```
+@MainActor
+public struct LaggedStart: ImagineScheduler {
+
+	let schedulers: [any ImagineScheduler]
+	let lagRatio: Double
+
+	public var objects: [any Imaginable] { schedulers.flatMap { $0.objects } }
+
+	public init(_ schedulers: any ImagineScheduler..., lagRatio: Double = 0.5) {
+		self.schedulers = schedulers
+		self.lagRatio = lagRatio
+	}
+
+	public init(_ schedulers: [any ImagineScheduler], lagRatio: Double = 0.5) {
+		self.schedulers = schedulers
+		self.lagRatio = lagRatio
+	}
+
+	public func schedule(startTime: TimeInterval, duration: TimeInterval, easing: AnimationEasing) {
+		let count = schedulers.count
+		guard count > 0 else { return }
+
+		// eachDuration * (1 + lagRatio * (count - 1)) = duration
+		let eachDuration = duration / (1 + lagRatio * Double(count - 1))
+		let lag = eachDuration * lagRatio
+
+		for (i, scheduler) in schedulers.enumerated() {
+			let start = startTime + Double(i) * lag
+			scheduler.schedule(startTime: start, duration: eachDuration, easing: easing)
+		}
+	}
+}
+
 // MARK: - Creation Animation
 
 /// An animation scheduler that reveals a ``GeometryProvider`` object with a draw-on effect.
